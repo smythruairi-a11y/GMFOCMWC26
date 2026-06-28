@@ -79,12 +79,12 @@ const TEAM_DATA = {
 // Owner colour classes (matches CSS)
 const OWNER_CLASS = {
   "Claudia": "oc-claudia",
-  "Eva": "oc-eva",
-  "Elma": "oc-elma",
+  "Eva":     "oc-eva",
+  "Elma":    "oc-elma",
   "Ibrahim": "oc-ibrahim",
-  "Ricky": "oc-ricky",
-  "Roger": "oc-roger",
-  "Ruairi": "oc-ruairi",
+  "Ricky":   "oc-ricky",
+  "Roger":   "oc-roger",
+  "Ruairi":  "oc-ruairi",
   "William": "oc-william"
 };
 
@@ -109,6 +109,7 @@ const TEAM_ALIASES = {
   "Congo DR": "DR Congo",
   "Democratic Republic of the Congo": "DR Congo",
   "Cabo Verde": "Cape Verde",
+  "Cape Verde Islands": "Cape Verde",
   "Saudi-Arabia": "Saudi Arabia"
 };
 
