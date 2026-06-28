@@ -652,51 +652,16 @@ async function fetchMatches() {
 }
 
 // ---------------------------------------------------------
-// TEAM STATUS CALCULATION
-// ---------------------------------------------------------
-function getGroupMatches(group) {
-  return allMatches.filter(m => m.group && m.group.toUpperCase().includes('GROUP ' + group.toUpperCase()) ||
-                                  m.group === group);
-}
-
-function computeGroupTable(group) {
-  const teams = Object.entries(TEAM_DATA).filter(([name,d]) => d.group === group).map(([name]) => name);
-  const table = {};
-  teams.forEach(t => table[t] = { team:t, played:0, won:0, drawn:0, lost:0, gf:0, ga:0, gd:0, pts:0 });
-
-  const matches = allMatches.filter(m => {
-    return teams.includes(m.home) && teams.includes(m.away);
-  });
-
-  matches.forEach(m => {
-    if (m.homeScore === null || m.awayScore === null) return;
-    const h = table[m.home], a = table[m.away];
-    if (!h || !a) return;
-    h.played++; a.played++;
-    h.gf += m.homeScore; h.ga += m.awayScore;
-    a.gf += m.awayScore; a.ga += m.homeScore;
-    if (m.homeScore > m.awayScore) { h.won++; h.pts+=3; a.lost++; }
-    else if (m.homeScore < m.awayScore) { a.won++; a.pts+=3; h.lost++; }
-    else { h.drawn++; a.drawn++; h.pts++; a.pts++; }
-  });
-
-  Object.values(table).forEach(t => t.gd = t.gf - t.ga);
-
-  return Object.values(table).sort((a,b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
-}
-
-// A team is eliminated if mathematically impossible to reach top 2
-// (simplified: if played all 3 group games and not top 2 by points, OR
-//  cannot catch up even with max remaining points)
-// ---------------------------------------------------------
 // TEAM STATUS — hardcoded from real results
-// Update this after each round completes
-// Status: 'qualified' | 'eliminated_group' | 'eliminated_ko' | 'active' | 'pending'
+// Last updated: 28 June 2026 — R32 just started
+// Status: 'qualified' = in R32 | 'eliminated_group' = out at group stage
+// Update to 'eliminated_ko' as teams get knocked out in R32 onwards
 // ---------------------------------------------------------
 const TEAM_STATUS_OVERRIDE = {
-  // ── GROUP STAGE ELIMINATED ──
+
+  // ══ GROUP STAGE ELIMINATED (16 teams) ══
   'Haiti':              'eliminated_group',
-  'Türkiye':           'eliminated_group',
+  'Türkiye':            'eliminated_group',
   'Qatar':              'eliminated_group',
   'Tunisia':            'eliminated_group',
   'Jordan':             'eliminated_group',
@@ -704,71 +669,58 @@ const TEAM_STATUS_OVERRIDE = {
   'Curaçao':            'eliminated_group',
   'New Zealand':        'eliminated_group',
   'Uruguay':            'eliminated_group',
+  'Saudi Arabia':       'eliminated_group',
   'South Korea':        'eliminated_group',
   'Czechia':            'eliminated_group',
   'Iraq':               'eliminated_group',
   'Scotland':           'eliminated_group',
+  'Iran':               'eliminated_group',
+  'Uzbekistan':         'eliminated_group',
 
-  // ── THROUGH TO R32 (confirmed) ──
-  // Group A
+  // ══ QUALIFIED FOR R32 (32 teams) ══
+  // Group winners (12)
   'Mexico':             'qualified',
-  'South Africa':       'qualified',
-  // Group B
   'Switzerland':        'qualified',
-  'Canada':             'qualified',
-  // Group C
   'Brazil':             'qualified',
-  'Morocco':            'qualified',
-  // Group D
   'United States':      'qualified',
-  'Australia':          'qualified',
-  // Group E
   'Germany':            'qualified',
-  'Ivory Coast':        'qualified',
-  // Group F
   'Netherlands':        'qualified',
-  'Japan':              'qualified',
-  // Group G
   'Belgium':            'qualified',
-  'Egypt':              'qualified',
-  // Group H
   'Spain':              'qualified',
-  'Cape Verde':         'qualified',
-  // Group I
   'France':             'qualified',
-  'Norway':             'qualified',
-  // Group J
   'Argentina':          'qualified',
-  'Austria':            'qualified',
-  // Group K
   'Colombia':           'qualified',
-  'Portugal':           'qualified',
-  // Group L
   'England':            'qualified',
+  // Group runners-up (12)
+  'South Africa':       'qualified',
+  'Canada':             'qualified',
+  'Morocco':            'qualified',
+  'Australia':          'qualified',
+  'Ivory Coast':        'qualified',
+  'Japan':              'qualified',
+  'Egypt':              'qualified',
+  'Cape Verde':         'qualified',
+  'Norway':             'qualified',
+  'Austria':            'qualified',
+  'Portugal':           'qualified',
   'Croatia':            'qualified',
-  // Best 3rd place teams (8 of 12)
+  // Best 3rd place (8)
+  'Bosnia-Herzegovina': 'qualified',
   'Paraguay':           'qualified',
   'Ecuador':            'qualified',
   'Sweden':             'qualified',
-  'Bosnia-Herzegovina': 'qualified',
   'Senegal':            'qualified',
-  'Ghana':              'qualified',
   'Algeria':            'qualified',
+  'Ghana':              'qualified',
   'DR Congo':           'qualified',
-  // 3rd place teams that did NOT qualify
-  'Iran':               'eliminated_group',
-  'South Africa':       'qualified', // already listed above
 };
 
 function getTeamStatus(teamName) {
-  // Check override first
   const override = TEAM_STATUS_OVERRIDE[teamName];
   if (override) return override;
-  // Also check via alias resolution
   const canonical = normalizeTeamName(teamName);
   const overrideCanon = TEAM_STATUS_OVERRIDE[canonical];
   if (overrideCanon) return overrideCanon;
-  // Default: still active (group stage in progress)
   return 'active';
 }
 
