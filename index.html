@@ -652,14 +652,13 @@ async function fetchMatches() {
 }
 
 // ---------------------------------------------------------
-// TEAM STATUS — hardcoded from real results
-// Last updated: 28 June 2026 — R32 just started
-// Status: 'qualified' = in R32 | 'eliminated_group' = out at group stage
-// Update to 'eliminated_ko' as teams get knocked out in R32 onwards
+// TEAM STATUS — updated July 9 2026 (QF stage)
+// Bracket fills automatically from CSV. This table drives
+// colour coding in The Draw and Standings tabs only.
 // ---------------------------------------------------------
 const TEAM_STATUS_OVERRIDE = {
 
-  // ══ GROUP STAGE ELIMINATED (16 teams) ══
+  // ══ GROUP STAGE ELIMINATED (16) ══
   'Haiti':              'eliminated_group',
   'Türkiye':            'eliminated_group',
   'Qatar':              'eliminated_group',
@@ -677,42 +676,43 @@ const TEAM_STATUS_OVERRIDE = {
   'Iran':               'eliminated_group',
   'Uzbekistan':         'eliminated_group',
 
-  // ══ QUALIFIED FOR R32 (32 teams) ══
-  // Group winners (12)
-  'Mexico':             'qualified',
-  'Switzerland':        'qualified',
-  'Brazil':             'qualified',
-  'United States':      'qualified',
-  'Germany':            'qualified',
-  'Netherlands':        'qualified',
-  'Belgium':            'qualified',
-  'Spain':              'qualified',
+  // ══ ROUND OF 32 ELIMINATED (16) ══
+  'Sweden':             'eliminated_ko',
+  'South Africa':       'eliminated_ko',
+  'Paraguay':           'eliminated_ko',
+  'Netherlands':        'eliminated_ko',
+  'Japan':              'eliminated_ko',
+  'Ivory Coast':        'eliminated_ko',
+  'Ecuador':            'eliminated_ko',
+  'DR Congo':           'eliminated_ko',
+  'Senegal':            'eliminated_ko',
+  'Bosnia-Herzegovina': 'eliminated_ko',
+  'Croatia':            'eliminated_ko',
+  'Austria':            'eliminated_ko',
+  'Algeria':            'eliminated_ko',
+  'Cape Verde':         'eliminated_ko',
+  'Ghana':              'eliminated_ko',
+  'Australia':          'eliminated_ko',
+
+  // ══ ROUND OF 16 ELIMINATED (8) ══
+  'Canada':             'eliminated_ko',
+  'Germany':            'eliminated_ko',
+  'Brazil':             'eliminated_ko',
+  'Mexico':             'eliminated_ko',
+  'Portugal':           'eliminated_ko',
+  'United States':      'eliminated_ko',
+  'Egypt':              'eliminated_ko',
+  'Colombia':           'eliminated_ko',
+
+  // ══ QUARTER FINALISTS — still in (8) ══
   'France':             'qualified',
-  'Argentina':          'qualified',
-  'Colombia':           'qualified',
-  'England':            'qualified',
-  // Group runners-up (12)
-  'South Africa':       'qualified',
-  'Canada':             'qualified',
   'Morocco':            'qualified',
-  'Australia':          'qualified',
-  'Ivory Coast':        'qualified',
-  'Japan':              'qualified',
-  'Egypt':              'qualified',
-  'Cape Verde':         'qualified',
+  'Spain':              'qualified',
+  'Belgium':            'qualified',
   'Norway':             'qualified',
-  'Austria':            'qualified',
-  'Portugal':           'qualified',
-  'Croatia':            'qualified',
-  // Best 3rd place (8)
-  'Bosnia-Herzegovina': 'qualified',
-  'Paraguay':           'qualified',
-  'Ecuador':            'qualified',
-  'Sweden':             'qualified',
-  'Senegal':            'qualified',
-  'Algeria':            'qualified',
-  'Ghana':              'qualified',
-  'DR Congo':           'qualified',
+  'England':            'qualified',
+  'Argentina':          'qualified',
+  'Switzerland':        'qualified',
 };
 
 function getTeamStatus(teamName) {
@@ -1006,26 +1006,38 @@ function getRankedThirds() {
 }
 
 // Build HTML for a single bracket match card
-function bmHTML(matchNum, team1, team2, date) {
+function bmHTML(matchNum, team1, team2, date, matchObj) {
   function teamRow(info) {
     if (!info || !info.data) {
-      // TBD slot — show match reference text
       const label = info ? info.team : '...';
       return `<div class="bm-team tbd">${label}</div>`;
     }
-    const { team, data, confirmed } = info;
+    const { team, data, confirmed, eliminated } = info;
     const flag = `<span class="bmt-flag">${data.flag}</span>`;
     const ownerTag = `<span class="bmt-owner ${OWNER_CLASS[data.owner]||''}">${data.owner}</span>`;
-    const isElim = getTeamStatus(team) === 'eliminated_group';
     let cls = '';
-    if (isElim) cls = 'eliminated';
+    if (eliminated) cls = 'eliminated';
     else if (!confirmed) cls = 'potential';
     return `<div class="bm-team ${cls}">${flag}<span class="bmt-name">${team}</span>${ownerTag}</div>`;
   }
 
-  const bothConfirmed = team1?.confirmed && team2?.confirmed;
+  const bothConfirmed = team1?.confirmed && team2?.confirmed && team1?.data && team2?.data;
+
+  // Build score string from matchObj if available
+  let scoreStr = '';
+  if (matchObj && matchObj.status === 'FINISHED' && matchObj.homeScore !== null) {
+    const home = normalizeTeamName(matchObj.home);
+    const t1name = team1?.team;
+    const isHomeT1 = home === t1name;
+    const s1 = isHomeT1 ? matchObj.homeScore : matchObj.awayScore;
+    const s2 = isHomeT1 ? matchObj.awayScore : matchObj.homeScore;
+    scoreStr = `${s1}–${s2}`;
+  }
+
   const dateStr = date ? ` · ${date}` : '';
-  const label = matchNum ? `M${matchNum}${dateStr}` : '';
+  const scoreDisplay = scoreStr ? ` <span style="color:#16a34a;font-weight:900">${scoreStr}</span>` : '';
+  const label = matchNum ? `M${matchNum}${dateStr}${scoreDisplay}` : '';
+
   return `<div class="bm ${bothConfirmed ? 'confirmed-match' : ''}">
     <div class="bm-label">${label}</div>
     ${teamRow(team1)}
@@ -1045,76 +1057,183 @@ function tbdHTML(label) {
 function renderBracket() {
   const container = document.getElementById('bracketContainer');
 
-  // Look up a confirmed R32 team by name
-  const named = (teamName) => {
-    const data = lookupTeam(teamName);
-    if (!data) { console.warn('named(): no data for', teamName); return null; }
-    return { team: teamName, data, confirmed: true };
+  // ── MATCH LOOKUP ──
+  // Build a map of match ID → match object from allMatches
+  // Also build home+away team → match for knockout lookups
+  const koMatches = allMatches.filter(m => !m.group || m.group === '');
+
+  // Find a KO match by the two team names (order doesn't matter)
+  function findMatch(t1, t2) {
+    return koMatches.find(m =>
+      (normalizeTeamName(m.home) === t1 && normalizeTeamName(m.away) === t2) ||
+      (normalizeTeamName(m.home) === t2 && normalizeTeamName(m.away) === t1)
+    ) || null;
+  }
+
+  // Get winner of a match (null if not finished)
+  function getWinner(match) {
+    if (!match || match.status !== 'FINISHED') return null;
+    if (match.homeScore === null || match.awayScore === null) return null;
+    // In KO stage, no draws — higher score wins (AET/pens handled by score)
+    const home = normalizeTeamName(match.home);
+    const away = normalizeTeamName(match.away);
+    if (match.homeScore > match.awayScore) return home;
+    if (match.awayScore > match.homeScore) return away;
+    // Exact 0-0 draw can happen (pens) — check if we have extra data, otherwise treat as tbd
+    return null;
+  }
+
+  // Get loser of a match
+  function getLoser(match) {
+    if (!match || match.status !== 'FINISHED') return null;
+    const home = normalizeTeamName(match.home);
+    const away = normalizeTeamName(match.away);
+    if (match.homeScore > match.awayScore) return away;
+    if (match.awayScore > match.homeScore) return home;
+    return null;
+  }
+
+  // ── TEAM INFO HELPER ──
+  function teamInfo(name, confirmed) {
+    if (!name) return null;
+    const data = lookupTeam(name);
+    return { team: name, data, confirmed: !!confirmed };
+  }
+
+  // ── BUILD BRACKET CARD ──
+  function card(num, t1name, t2name, date, matchObj) {
+    const t1 = teamInfo(t1name, !!t1name);
+    const t2 = teamInfo(t2name, !!t2name);
+    let score = '';
+    if (matchObj && matchObj.status === 'FINISHED' && matchObj.homeScore !== null) {
+      const h = normalizeTeamName(matchObj.home) === t1name ? matchObj.homeScore : matchObj.awayScore;
+      const a = normalizeTeamName(matchObj.home) === t1name ? matchObj.awayScore : matchObj.homeScore;
+      score = `${h}–${a}`;
+    }
+    return bmHTML(num, t1, t2, date, score);
+  }
+
+  // ── OFFICIAL R32 FIXTURES (team names hardcoded — these never change) ──
+  const R32 = {
+    73: ['South Africa',  'Canada'],
+    74: ['Germany',       'Paraguay'],
+    75: ['Netherlands',   'Morocco'],
+    76: ['Brazil',        'Japan'],
+    77: ['France',        'Sweden'],
+    78: ['Ivory Coast',   'Norway'],
+    79: ['Mexico',        'Ecuador'],
+    80: ['England',       'DR Congo'],
+    81: ['United States', 'Bosnia-Herzegovina'],
+    82: ['Belgium',       'Senegal'],
+    83: ['Portugal',      'Croatia'],
+    84: ['Spain',         'Austria'],
+    85: ['Switzerland',   'Algeria'],
+    86: ['Argentina',     'Cape Verde'],
+    87: ['Colombia',      'Ghana'],
+    88: ['Australia',     'Egypt'],
   };
 
-  // TBD slot — winner of a previous match
-  const wm = (n) => ({ team: `W M${n}`, data: null, confirmed: false });
+  // Get winner of an R32 match by number
+  function wR32(n) {
+    const [t1, t2] = R32[n];
+    const m = findMatch(t1, t2);
+    return { winner: getWinner(m), match: m };
+  }
 
-  // ---- R32 MATCHES (official FIFA pairings) ----
-  // LEFT HALF (top → bottom, feeds into left tree)
-  const m74 = bmHTML(74, named('Germany'),       named('Paraguay'),           '29 jun');
-  const m77 = bmHTML(77, named('France'),        named('Sweden'),             '30 jun');
-  const m73 = bmHTML(73, named('South Africa'),  named('Canada'),             '28 jun');
-  const m75 = bmHTML(75, named('Netherlands'),   named('Morocco'),            '30 jun');
-  const m83 = bmHTML(83, named('Portugal'),      named('Croatia'),            '3 jul');
-  const m84 = bmHTML(84, named('Spain'),         named('Austria'),            '2 jul');
-  const m81 = bmHTML(81, named('United States'), named('Bosnia-Herzegovina'), '2 jul');
-  const m82 = bmHTML(82, named('Belgium'),       named('Senegal'),            '1 jul');
+  // Get winner of any KO match by the two team names
+  function wKO(t1, t2) {
+    if (!t1 || !t2) return { winner: null, match: null };
+    const m = findMatch(t1, t2);
+    return { winner: getWinner(m), match: m };
+  }
 
-  // RIGHT HALF (top → bottom, feeds into right tree)
-  const m76 = bmHTML(76, named('Brazil'),        named('Japan'),              '29 jun');
-  const m78 = bmHTML(78, named('Ivory Coast'),   named('Norway'),             '30 jun');
-  const m79 = bmHTML(79, named('Mexico'),        named('Ecuador'),            '1 jul');
-  const m80 = bmHTML(80, named('England'),       named('DR Congo'),           '1 jul');
-  const m86 = bmHTML(86, named('Argentina'),     named('Cape Verde'),         '4 jul');
-  const m88 = bmHTML(88, named('Australia'),     named('Egypt'),              '3 jul');
-  const m85 = bmHTML(85, named('Switzerland'),   named('Algeria'),            '3 jul');
-  const m87 = bmHTML(87, named('Colombia'),      named('Ghana'),              '4 jul');
+  // ── BUILD ALL ROUNDS DYNAMICALLY ──
 
-  // ---- R16 (official pairings from Wikipedia) ----
-  // LEFT half R16: W74 vs W77 → M89; W73 vs W75 → M90; W83 vs W84 → M93; W81 vs W82 → M94
-  const r16L = [
-    bmHTML(89, wm(74), wm(77), '4 jul'),
-    bmHTML(90, wm(73), wm(75), '4 jul'),
-    bmHTML(93, wm(83), wm(84), '6 jul'),
-    bmHTML(94, wm(81), wm(82), '6 jul'),
-  ];
-  // RIGHT half R16: W76 vs W78 → M91; W79 vs W80 → M92; W86 vs W88 → M95; W85 vs W87 → M96
-  const r16R = [
-    bmHTML(91, wm(76), wm(78), '5 jul'),
-    bmHTML(92, wm(79), wm(80), '5 jul'),
-    bmHTML(95, wm(86), wm(88), '7 jul'),
-    bmHTML(96, wm(85), wm(87), '7 jul'),
-  ];
+  // R32 results
+  const r = {};
+  [73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88].forEach(n => {
+    r[n] = wR32(n);
+  });
 
-  // ---- QF ----
-  // LEFT: W89 vs W90 → M97; W93 vs W94 → M98
-  const qfL = [
-    bmHTML(97, wm(89), wm(90), '9 jul'),
-    bmHTML(98, wm(93), wm(94), '10 jul'),
-  ];
-  // RIGHT: W91 vs W92 → M99; W95 vs W96 → M100
-  const qfR = [
-    bmHTML(99,  wm(91), wm(92), '11 jul'),
-    bmHTML(100, wm(95), wm(96), '11 jul'),
-  ];
+  // R16 pairings (official FIFA bracket)
+  const r16 = {
+    89: wKO(r[74].winner, r[77].winner),  // W74 vs W77
+    90: wKO(r[73].winner, r[75].winner),  // W73 vs W75
+    91: wKO(r[76].winner, r[78].winner),  // W76 vs W78
+    92: wKO(r[79].winner, r[80].winner),  // W79 vs W80
+    93: wKO(r[83].winner, r[84].winner),  // W83 vs W84
+    94: wKO(r[81].winner, r[82].winner),  // W81 vs W82
+    95: wKO(r[86].winner, r[88].winner),  // W86 vs W88
+    96: wKO(r[85].winner, r[87].winner),  // W85 vs W87
+  };
 
-  // ---- SF ----
-  // LEFT: W97 vs W98 → M101
-  const sfL = [bmHTML(101, wm(97), wm(98), '14 jul')];
-  // RIGHT: W99 vs W100 → M102
-  const sfR = [bmHTML(102, wm(99), wm(100), '15 jul')];
+  // QF pairings
+  const qf = {
+    97:  wKO(r16[89].winner, r16[90].winner), // W89 vs W90
+    98:  wKO(r16[93].winner, r16[94].winner), // W93 vs W94
+    99:  wKO(r16[91].winner, r16[92].winner), // W91 vs W92
+    100: wKO(r16[95].winner, r16[96].winner), // W95 vs W96
+  };
 
-  // ---- FINAL ----
+  // SF pairings
+  const sf = {
+    101: wKO(qf[97].winner, qf[98].winner),  // W97 vs W98
+    102: wKO(qf[99].winner, qf[100].winner), // W99 vs W100
+  };
+
+  // Final
+  const fin = wKO(sf[101].winner, sf[102].winner);
+
+  // ── CARD BUILDER HELPERS ──
+  function r32card(n) {
+    const [t1, t2] = R32[n];
+    const m = r[n].match;
+    const w = r[n].winner;
+    return bmHTML(n,
+      { team: t1, data: lookupTeam(t1), confirmed: true, eliminated: w && w !== t1 },
+      { team: t2, data: lookupTeam(t2), confirmed: true, eliminated: w && w !== t2 },
+      null, m
+    );
+  }
+
+  function kocard(num, t1name, t2name, date, matchObj) {
+    const w = matchObj ? getWinner(matchObj) : null;
+    return bmHTML(num,
+      t1name ? { team: t1name, data: lookupTeam(t1name), confirmed: true, eliminated: w && w !== t1name } : null,
+      t2name ? { team: t2name, data: lookupTeam(t2name), confirmed: true, eliminated: w && w !== t2name } : null,
+      date, matchObj
+    );
+  }
+
+  // R16
+  const r16Cards = {
+    89: kocard(89,  r[74].winner, r[77].winner, '4 jul',  r16[89].match),
+    90: kocard(90,  r[73].winner, r[75].winner, '4 jul',  r16[90].match),
+    91: kocard(91,  r[76].winner, r[78].winner, '5 jul',  r16[91].match),
+    92: kocard(92,  r[79].winner, r[80].winner, '5 jul',  r16[92].match),
+    93: kocard(93,  r[83].winner, r[84].winner, '6 jul',  r16[93].match),
+    94: kocard(94,  r[81].winner, r[82].winner, '6 jul',  r16[94].match),
+    95: kocard(95,  r[86].winner, r[88].winner, '7 jul',  r16[95].match),
+    96: kocard(96,  r[85].winner, r[87].winner, '7 jul',  r16[96].match),
+  };
+
+  // QF
+  const qfCards = {
+    97:  kocard(97,  r16[89].winner, r16[90].winner, '9 jul',  qf[97].match),
+    98:  kocard(98,  r16[93].winner, r16[94].winner, '10 jul', qf[98].match),
+    99:  kocard(99,  r16[91].winner, r16[92].winner, '11 jul', qf[99].match),
+    100: kocard(100, r16[95].winner, r16[96].winner, '11 jul', qf[100].match),
+  };
+
+  // SF
+  const sfCards = {
+    101: kocard(101, qf[97].winner, qf[98].winner,   '14 jul', sf[101].match),
+    102: kocard(102, qf[99].winner, qf[100].winner,  '15 jul', sf[102].match),
+  };
+
+  // Final
   const finalCard = `<div class="bracket-final-match">
-    <div class="bm-label" style="background:#fffbeb;color:#b45309;border-bottom:1px solid #fde68a;font-weight:900;">M104 · FINALE · 19 jul</div>
-    <div class="bm-team tbd">W M101</div>
-    <div class="bm-team tbd">W M102</div>
+    ${kocard(104, sf[101].winner, sf[102].winner, '19 jul', fin.match)}
   </div>`;
 
   const round = (items, cls) => `<div class="bracket-round ${cls}">${items.join('')}</div>`;
@@ -1122,30 +1241,23 @@ function renderBracket() {
 
   container.innerHTML = `
   <div class="bracket-tree">
-
-    <!-- LEFT HALF: R32 → R16 → QF → SF → centre -->
     <div class="bracket-half">
-      ${round([m74,m77,m73,m75,m83,m84,m81,m82], 'r32')}${sp}
-      ${round(r16L, 'r16')}${sp}
-      ${round(qfL, 'qf')}${sp}
-      ${round(sfL, 'sf')}${sp}
+      ${round([r32card(74),r32card(77),r32card(73),r32card(75),r32card(83),r32card(84),r32card(81),r32card(82)], 'r32')}${sp}
+      ${round([r16Cards[89],r16Cards[90],r16Cards[93],r16Cards[94]], 'r16')}${sp}
+      ${round([qfCards[97],qfCards[98]], 'qf')}${sp}
+      ${round([sfCards[101]], 'sf')}${sp}
     </div>
-
-    <!-- CENTRE TROPHY -->
     <div class="bracket-center">
       <div class="bracket-trophy">🏆</div>
       <div class="bracket-final-label">Finale<br>19 Juli</div>
       ${finalCard}
     </div>
-
-    <!-- RIGHT HALF: SF → QF → R16 → R32 -->
     <div class="bracket-half right-half">
-      ${round([m76,m78,m79,m80,m86,m88,m85,m87], 'r32')}${sp}
-      ${round(r16R, 'r16')}${sp}
-      ${round(qfR, 'qf')}${sp}
-      ${round(sfR, 'sf')}${sp}
+      ${round([r32card(76),r32card(78),r32card(79),r32card(80),r32card(86),r32card(88),r32card(85),r32card(87)], 'r32')}${sp}
+      ${round([r16Cards[91],r16Cards[92],r16Cards[95],r16Cards[96]], 'r16')}${sp}
+      ${round([qfCards[99],qfCards[100]], 'qf')}${sp}
+      ${round([sfCards[102]], 'sf')}${sp}
     </div>
-
   </div>`;
 }
 
